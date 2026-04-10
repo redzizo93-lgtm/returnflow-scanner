@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Scan Barcode</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, sans-serif; }
+body { background: #000; color: white; height: 100vh; display: flex; flex-direction: column; }
+#header { background: #1e1b4b; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; }
+#header h1 { font-size: 16px; font-weight: 600; }
+#closeBtn { background: rgba(255,255,255,0.15); border: none; color: white; padding: 6px 14px; border-radius: 20px; font-size: 13px; cursor: pointer; }
+#qr-reader { flex: 1; width: 100%; }
+#qr-reader video { width: 100% !important; height: 100% !important; object-fit: cover; }
+#status { position: fixed; bottom: 0; left: 0; right: 0; background: #1e1b4b; padding: 16px; text-align: center; font-size: 14px; }
+#status.error { background: #7f1d1d; }
+#status.success { background: #14532d; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>📷 Scan Barcode / QR</h1>
+  <button id="closeBtn">✕ Close</button>
+</div>
+<div id="qr-reader"></div>
+<div id="status">Point camera at barcode...</div>
+
+<script>
+var scanner = new Html5Qrcode('qr-reader');
+var origin = document.referrer ? new URL(document.referrer).origin : '*';
+
+function setStatus(msg, type) {
+  var el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = type || '';
+}
+
+Html5Qrcode.getCameras().then(function(cameras) {
+  if (!cameras || cameras.length === 0) { setStatus('No camera found.', 'error'); return; }
+  var cam = cameras.find(function(c){ return /back|rear|environment/i.test(c.label); }) || cameras[cameras.length - 1];
+  setStatus('Starting camera...');
+  scanner.start(
+    cam.id,
+    { fps: 15, qrbox: { width: 280, height: 180 } },
+    function(text) {
+      scanner.stop().catch(function(){});
+      setStatus('✓ Scanned: ' + text, 'success');
+      // Send result back to parent window
+      window.opener ? window.opener.postMessage({ type: 'SCAN_RESULT', tracking: text }, '*') : window.parent.postMessage({ type: 'SCAN_RESULT', tracking: text }, '*');
+      setTimeout(function(){ window.close(); }, 1200);
+    },
+    function() {}
+  ).then(function(){ setStatus('Point camera at barcode...'); })
+   .catch(function(err){ setStatus('Camera error: ' + err, 'error'); });
+}).catch(function(){ setStatus('Camera permission denied.', 'error'); });
+
+document.getElementById('closeBtn').onclick = function() {
+  scanner.stop().catch(function(){});
+  window.opener ? window.opener.postMessage({ type: 'SCAN_CANCEL' }, '*') : window.parent.postMessage({ type: 'SCAN_CANCEL' }, '*');
+  window.close();
+};
+</script>
+</body>
+</html>
