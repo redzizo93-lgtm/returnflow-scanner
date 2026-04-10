@@ -79,17 +79,16 @@ function setStatus(msg, type) {
 
 function sendResult(text) {
   beep();
-  setStatus('✓ Scanned: ' + text, 'success');
-  // Store result then navigate back
+  setStatus('✓ Scanned: ' + text + ' — returning...', 'success');
   localStorage.setItem('SCAN_RESULT', text);
   setTimeout(function() {
-    window.location.href = returnURL;
-  }, 800);
+    window.close(); // close this tab, return to app tab
+  }, 900);
 }
 
 document.getElementById('backBtn').onclick = function() {
   if (scanner) scanner.stop().catch(function(){});
-  window.location.href = returnURL;
+  window.close();
 };
 
 document.getElementById('manualBtn').onclick = function() {
