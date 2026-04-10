@@ -80,9 +80,19 @@ function setStatus(msg, type) {
 function sendResult(text) {
   beep();
   setStatus('✓ Scanned: ' + text + ' — returning...', 'success');
-  localStorage.setItem('SCAN_RESULT', text);
+  
+  // Try to send result back to opener window
+  if (window.opener) {
+    try {
+      window.opener.postMessage({ type: 'SCAN_RESULT', tracking: text }, '*');
+    } catch(e) { console.log('postMessage failed:', e); }
+  }
+  
+  // Also store in localStorage as backup
+  try { localStorage.setItem('SCAN_RESULT', text); } catch(e){}
+  
   setTimeout(function() {
-    window.close(); // close this tab, return to app tab
+    window.close();
   }, 900);
 }
 
