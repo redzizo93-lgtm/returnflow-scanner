@@ -115,9 +115,14 @@ var lastScan = '', lastScanTime = 0;
 function extractTrackingNumber(text) {
   // Try to extract SD tracking numbers (e.g., SD000307079MA)
   var sdMatch = text.match(/SD\d+[A-Z]*/i);
-  if (sdMatch) return sdMatch[0].toUpperCase();
+  if (sdMatch) {
+    console.log('Found SD match:', sdMatch[0]);
+    return sdMatch[0].toUpperCase();
+  }
+  // Log what we got for debugging
+  console.log('No SD match found in:', text);
   // Otherwise return the full text
-  return text;
+  return text.trim();
 }
 
 Html5Qrcode.getCameras().then(function(cameras) {
@@ -128,10 +133,16 @@ Html5Qrcode.getCameras().then(function(cameras) {
     cam.id,
     { fps: 15, qrbox: { width: 270, height: 170 } },
     function(text) {
+      console.log('Raw scan result:', text);
       var now = Date.now();
       var extracted = extractTrackingNumber(text);
-      if (extracted === lastScan && now - lastScanTime < 3000) return;
+      console.log('Extracted tracking:', extracted);
+      if (extracted === lastScan && now - lastScanTime < 3000) {
+        console.log('Duplicate scan, ignoring');
+        return;
+      }
       lastScan = extracted; lastScanTime = now;
+      console.log('Sending result:', extracted);
       scanner.stop().catch(function(){});
       sendResult(extracted);
     },
