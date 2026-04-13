@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Scanner</title>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,sans-serif; }
 body { background:#000; color:white; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
@@ -98,94 +98,123 @@ function sendResult(text) {
 }
 
 document.getElementById('backBtn').onclick = function() {
-  if (Quagga) Quagga.stop();
+  stopCamera();
   window.close();
 };
 
 document.getElementById('manualBtn').onclick = function() {
   var val = document.getElementById('manualInput').value.trim();
-  if (val) { if (Quagga) Quagga.stop(); sendResult(val); }
+  if (val) { stopCamera(); sendResult(val); }
 };
 document.getElementById('manualInput').onkeydown = function(e) {
   if (e.key === 'Enter') document.getElementById('manualBtn').click();
 };
 
-var scanner = null;
 var lastScan = '', lastScanTime = 0;
+var videoStream = null;
+var videoElement = null;
+var canvasElement = null;
+var isScanning = true;
 
 function extractTrackingNumber(text) {
-  // Try to extract SD tracking numbers (e.g., SD000307079MA)
+  // Extract SD tracking numbers (e.g., SD000307079MA)
   var sdMatch = text.match(/SD\d+[A-Z]*/i);
   if (sdMatch) {
     console.log('Found SD match:', sdMatch[0]);
     return sdMatch[0].toUpperCase();
   }
-  // Log what we got for debugging
   console.log('No SD match found in:', text);
-  // Otherwise return the full text
-  return text.trim();
+  return null;
 }
 
-// Initialize Quagga for 1D barcode scanning
-Quagga.init({
-  inputStream: {
-    name: 'Live',
-    type: 'LiveStream',
-    target: document.querySelector('#qr-reader'),
-    constraints: {
-      width: { min: 640 },
-      height: { min: 480 },
-      facingMode: 'environment'
-    }
-  },
-  decoder: {
-    readers: ['code_128_reader', 'ean_reader', 'ean_8_reader', 'code_39_reader', 'code_39_vin_reader', 'codabar_reader', 'upc_reader', 'upc_e_reader', 'i2of5_reader'],
-    debug: {
-      showCanvas: false,
-      showPatterns: false,
-      showLines: false,
-      showCandidates: false
-    }
-  },
-  locator: {
-    halfSample: true
-  }
-}, function(err) {
-  if (err) {
-    console.error('Quagga init error:', err);
-    setStatus('Camera error: ' + err.message, 'error');
-    return;
-  }
-  console.log('Quagga initialized');
-  Quagga.start();
-  setStatus('Point camera at barcode...', '');
-});
+function startCamera() {
+  var container = document.getElementById('qr-reader');
+  
+  // Create video element
+  videoElement = document.createElement('video');
+  videoElement.setAttribute('playsinline', 'true');
+  videoElement.setAttribute('autoplay', 'true');
+  videoElement.setAttribute('muted', 'true');
+  videoElement.style.width = '100%';
+  videoElement.style.height = '100%';
+  videoElement.style.objectFit = 'cover';
+  container.innerHTML = '';
+  container.appendChild(videoElement);
+  
+  // Create canvas for frame capture
+  canvasElement = document.createElement('canvas');
+  
+  // Request camera access
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false
+  }).then(function(stream) {
+    videoStream = stream;
+    videoElement.srcObject = stream;
+    setStatus('Point camera at barcode...', '');
+    
+    // Start OCR scanning loop
+    scanFrame();
+  }).catch(function(err) {
+    console.error('Camera error:', err);
+    setStatus('Camera permission denied — use manual entry below.', 'error');
+  });
+}
 
-Quagga.onDetected(function(result) {
-  if (!result || !result.codeResult) return;
-  var text = result.codeResult.code;
-  console.log('Raw scan result:', text);
+function scanFrame() {
+  if (!isScanning || !videoElement) return;
   
-  var now = Date.now();
-  var extracted = extractTrackingNumber(text);
-  console.log('Extracted tracking:', extracted);
-  
-  if (extracted === lastScan && now - lastScanTime < 3000) {
-    console.log('Duplicate scan, ignoring');
-    return;
+  try {
+    canvasElement.width = videoElement.videoWidth;
+    canvasElement.height = videoElement.videoHeight;
+    var ctx = canvasElement.getContext('2d');
+    ctx.drawImage(videoElement, 0, 0);
+    
+    // Run OCR on the frame
+    Tesseract.recognize(canvasElement, 'eng', {
+      logger: function() {}
+    }).then(function(result) {
+      var text = result.data.text;
+      if (text) {
+        var tracking = extractTrackingNumber(text);
+        if (tracking) {
+          var now = Date.now();
+          if (tracking === lastScan && now - lastScanTime < 3000) {
+            console.log('Duplicate scan, ignoring');
+            setTimeout(scanFrame, 500);
+            return;
+          }
+          lastScan = tracking;
+          lastScanTime = now;
+          console.log('Found tracking:', tracking);
+          isScanning = false;
+          stopCamera();
+          sendResult(tracking);
+          return;
+        }
+      }
+      // Continue scanning
+      setTimeout(scanFrame, 800);
+    }).catch(function(err) {
+      console.error('OCR error:', err);
+      setTimeout(scanFrame, 800);
+    });
+  } catch(e) {
+    console.error('Frame scan error:', e);
+    setTimeout(scanFrame, 800);
   }
-  
-  lastScan = extracted;
-  lastScanTime = now;
-  console.log('Sending result:', extracted);
-  
-  Quagga.stop();
-  sendResult(extracted);
-});
+}
 
-Quagga.onProcessed(function(result) {
-  // Optional: update UI with detection progress
-});
+function stopCamera() {
+  isScanning = false;
+  if (videoStream) {
+    videoStream.getTracks().forEach(function(track) { track.stop(); });
+    videoStream = null;
+  }
+}
+
+// Start camera on load
+startCamera();
 </script>
 </body>
 </html>
