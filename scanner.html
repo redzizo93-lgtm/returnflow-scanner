@@ -4,14 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Scanner</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,sans-serif; }
 body { background:#000; color:white; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
 #header { background:#1e1b4b; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
 #header h1 { font-size:15px; font-weight:700; display:flex; align-items:center; gap:8px; }
 #backBtn { background:rgba(255,255,255,0.15); border:none; color:white; padding:7px 16px; border-radius:20px; font-size:13px; cursor:pointer; }
-#qr-reader { flex:1; width:100%; position:relative; overflow:hidden; background:#111; display:flex; align-items:center; justify-content:center; }
+#qr-reader { flex:1; width:100%; position:relative; overflow:hidden; }
 #qr-reader video { width:100% !important; height:100% !important; object-fit:cover; position:absolute; inset:0; }
+#qr-reader img, #qr-reader button, #qr-reader select, #qr-reader span { display:none !important; }
 #overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
 #scanbox { width:270px; height:170px; border:3px solid #6366f1; border-radius:14px; box-shadow:0 0 0 9999px rgba(0,0,0,0.5); position:relative; }
 #scanline { position:absolute; left:6px; right:6px; height:2px; background:linear-gradient(90deg,transparent,#818cf8,transparent); animation:scan 1.8s linear infinite; top:4px; }
@@ -42,17 +44,21 @@ body { background:#000; color:white; height:100vh; display:flex; flex-direction:
   </div>
 </div>
 
-<div id="status">Camera initializing...</div>
+<div id="status">Initializing camera...</div>
 
 <div id="manual">
   <p>Or enter manually:</p>
   <div class="row">
-    <input type="text" id="manualInput" placeholder="Enter tracking number (e.g., SD000307079MA)" autocomplete="off">
+    <input type="text" id="manualInput" placeholder="Enter tracking number" autocomplete="off">
     <button id="manualBtn">Submit</button>
   </div>
 </div>
 
 <script>
+// Get return URL from query param
+var params = new URLSearchParams(window.location.search);
+var returnURL = params.get('return') || document.referrer || '/';
+
 function beep() {
   try {
     var ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -91,46 +97,41 @@ function sendResult(text) {
 }
 
 document.getElementById('backBtn').onclick = function() {
+  if (scanner) scanner.stop().catch(function(){});
   window.close();
 };
 
 document.getElementById('manualBtn').onclick = function() {
-  var val = document.getElementById('manualInput').value.trim().toUpperCase();
-  if (val) { sendResult(val); }
+  var val = document.getElementById('manualInput').value.trim();
+  if (val) { if (scanner) scanner.stop().catch(function(){}); sendResult(val); }
 };
-
 document.getElementById('manualInput').onkeydown = function(e) {
   if (e.key === 'Enter') document.getElementById('manualBtn').click();
 };
 
-// Try to start camera for visual reference
-navigator.mediaDevices.getUserMedia({
-  video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-  audio: false
-}).then(function(stream) {
-  var video = document.createElement('video');
-  video.setAttribute('playsinline', 'true');
-  video.setAttribute('autoplay', 'true');
-  video.setAttribute('muted', 'true');
-  video.style.width = '100%';
-  video.style.height = '100%';
-  video.style.objectFit = 'cover';
-  
-  var container = document.getElementById('qr-reader');
-  container.innerHTML = '';
-  container.appendChild(video);
-  
-  // Re-add overlay on top
-  var overlay = document.createElement('div');
-  overlay.id = 'overlay';
-  overlay.innerHTML = '<div id="scanbox"><div id="scanline"></div></div><p id="hint">Align barcode within the frame</p>';
-  container.appendChild(overlay);
-  
-  video.srcObject = stream;
-  setStatus('Point camera at barcode or enter manually below', '');
-}).catch(function(err) {
-  console.error('Camera error:', err);
-  setStatus('Camera not available — use manual entry below', 'error');
+var scanner = new Html5Qrcode('qr-reader');
+var lastScan = '', lastScanTime = 0;
+
+Html5Qrcode.getCameras().then(function(cameras) {
+  if (!cameras || cameras.length === 0) { setStatus('No camera found.', 'error'); return; }
+  var cam = cameras.find(function(c){ return /back|rear|environment/i.test(c.label); }) || cameras[cameras.length - 1];
+
+  scanner.start(
+    cam.id,
+    { fps: 15, qrbox: { width: 270, height: 170 } },
+    function(text) {
+      var now = Date.now();
+      if (text === lastScan && now - lastScanTime < 3000) return;
+      lastScan = text; lastScanTime = now;
+      scanner.stop().catch(function(){});
+      sendResult(text);
+    },
+    function() {}
+  ).then(function() { setStatus('Point camera at barcode...'); })
+   .catch(function(err) { setStatus('Camera error: ' + err, 'error'); });
+
+}).catch(function() {
+  setStatus('Camera permission denied — use manual entry below.', 'error');
 });
 </script>
 </body>
