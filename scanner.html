@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Scanner</title>
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,sans-serif; }
 body { background:#000; color:white; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
@@ -97,19 +98,19 @@ function sendResult(text) {
 }
 
 document.getElementById('backBtn').onclick = function() {
-  if (scanner) scanner.stop().catch(function(){});
+  if (Quagga) Quagga.stop();
   window.close();
 };
 
 document.getElementById('manualBtn').onclick = function() {
   var val = document.getElementById('manualInput').value.trim();
-  if (val) { if (scanner) scanner.stop().catch(function(){}); sendResult(val); }
+  if (val) { if (Quagga) Quagga.stop(); sendResult(val); }
 };
 document.getElementById('manualInput').onkeydown = function(e) {
   if (e.key === 'Enter') document.getElementById('manualBtn').click();
 };
 
-var scanner = new Html5Qrcode('qr-reader');
+var scanner = null;
 var lastScan = '', lastScanTime = 0;
 
 function extractTrackingNumber(text) {
@@ -125,33 +126,65 @@ function extractTrackingNumber(text) {
   return text.trim();
 }
 
-Html5Qrcode.getCameras().then(function(cameras) {
-  if (!cameras || cameras.length === 0) { setStatus('No camera found.', 'error'); return; }
-  var cam = cameras.find(function(c){ return /back|rear|environment/i.test(c.label); }) || cameras[cameras.length - 1];
+// Initialize Quagga for 1D barcode scanning
+Quagga.init({
+  inputStream: {
+    name: 'Live',
+    type: 'LiveStream',
+    target: document.querySelector('#qr-reader'),
+    constraints: {
+      width: { min: 640 },
+      height: { min: 480 },
+      facingMode: 'environment'
+    }
+  },
+  decoder: {
+    readers: ['code_128_reader', 'ean_reader', 'ean_8_reader', 'code_39_reader', 'code_39_vin_reader', 'codabar_reader', 'upc_reader', 'upc_e_reader', 'i2of5_reader'],
+    debug: {
+      showCanvas: false,
+      showPatterns: false,
+      showLines: false,
+      showCandidates: false
+    }
+  },
+  locator: {
+    halfSample: true
+  }
+}, function(err) {
+  if (err) {
+    console.error('Quagga init error:', err);
+    setStatus('Camera error: ' + err.message, 'error');
+    return;
+  }
+  console.log('Quagga initialized');
+  Quagga.start();
+  setStatus('Point camera at barcode...', '');
+});
 
-  scanner.start(
-    cam.id,
-    { fps: 15, qrbox: { width: 270, height: 170 } },
-    function(text) {
-      console.log('Raw scan result:', text);
-      var now = Date.now();
-      var extracted = extractTrackingNumber(text);
-      console.log('Extracted tracking:', extracted);
-      if (extracted === lastScan && now - lastScanTime < 3000) {
-        console.log('Duplicate scan, ignoring');
-        return;
-      }
-      lastScan = extracted; lastScanTime = now;
-      console.log('Sending result:', extracted);
-      scanner.stop().catch(function(){});
-      sendResult(extracted);
-    },
-    function() {}
-  ).then(function() { setStatus('Point camera at barcode...'); })
-   .catch(function(err) { setStatus('Camera error: ' + err, 'error'); });
+Quagga.onDetected(function(result) {
+  if (!result || !result.codeResult) return;
+  var text = result.codeResult.code;
+  console.log('Raw scan result:', text);
+  
+  var now = Date.now();
+  var extracted = extractTrackingNumber(text);
+  console.log('Extracted tracking:', extracted);
+  
+  if (extracted === lastScan && now - lastScanTime < 3000) {
+    console.log('Duplicate scan, ignoring');
+    return;
+  }
+  
+  lastScan = extracted;
+  lastScanTime = now;
+  console.log('Sending result:', extracted);
+  
+  Quagga.stop();
+  sendResult(extracted);
+});
 
-}).catch(function() {
-  setStatus('Camera permission denied — use manual entry below.', 'error');
+Quagga.onProcessed(function(result) {
+  // Optional: update UI with detection progress
 });
 </script>
 </body>
