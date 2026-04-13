@@ -112,6 +112,14 @@ document.getElementById('manualInput').onkeydown = function(e) {
 var scanner = new Html5Qrcode('qr-reader');
 var lastScan = '', lastScanTime = 0;
 
+function extractTrackingNumber(text) {
+  // Try to extract SD tracking numbers (e.g., SD000307079MA)
+  var sdMatch = text.match(/SD\d+[A-Z]*/i);
+  if (sdMatch) return sdMatch[0].toUpperCase();
+  // Otherwise return the full text
+  return text;
+}
+
 Html5Qrcode.getCameras().then(function(cameras) {
   if (!cameras || cameras.length === 0) { setStatus('No camera found.', 'error'); return; }
   var cam = cameras.find(function(c){ return /back|rear|environment/i.test(c.label); }) || cameras[cameras.length - 1];
@@ -121,10 +129,11 @@ Html5Qrcode.getCameras().then(function(cameras) {
     { fps: 15, qrbox: { width: 270, height: 170 } },
     function(text) {
       var now = Date.now();
-      if (text === lastScan && now - lastScanTime < 3000) return;
-      lastScan = text; lastScanTime = now;
+      var extracted = extractTrackingNumber(text);
+      if (extracted === lastScan && now - lastScanTime < 3000) return;
+      lastScan = extracted; lastScanTime = now;
       scanner.stop().catch(function(){});
-      sendResult(text);
+      sendResult(extracted);
     },
     function() {}
   ).then(function() { setStatus('Point camera at barcode...'); })
