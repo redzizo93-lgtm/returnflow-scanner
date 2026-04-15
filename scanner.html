@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Scanner</title>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; font-family:-apple-system,sans-serif; }
 body { background:#000; color:white; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
@@ -51,6 +53,9 @@ body { background:#000; color:white; height:100vh; display:flex; flex-direction:
   <div class="row">
     <input type="text" id="manualInput" placeholder="Enter tracking number" autocomplete="off">
     <button id="manualBtn">Submit</button>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <button id="captureBtn" style="background:#f59e0b; flex:1;">📸 Capture & Extract</button>
   </div>
 </div>
 
@@ -111,6 +116,63 @@ document.getElementById('manualInput').onkeydown = function(e) {
 
 var scanner = new Html5Qrcode('qr-reader');
 var lastScan = '', lastScanTime = 0;
+var videoElement = null;
+
+function extractTrackingNumber(text) {
+  // Extract SD tracking numbers (e.g., SD000307079MA)
+  var sdMatch = text.match(/SD\d+[A-Z]*/i);
+  if (sdMatch) {
+    console.log('Found SD match:', sdMatch[0]);
+    return sdMatch[0].toUpperCase();
+  }
+  console.log('No SD match found in:', text);
+  return null;
+}
+
+document.getElementById('captureBtn').onclick = function() {
+  setStatus('Capturing image...', '');
+  
+  // Get video element from scanner
+  var video = document.querySelector('#qr-reader video');
+  if (!video) {
+    setStatus('Camera not ready', 'error');
+    return;
+  }
+  
+  // Create canvas and capture frame
+  var canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  var ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  
+  setStatus('Extracting text from image...', '');
+  
+  // Use Tesseract to extract text
+  Tesseract.recognize(canvas, 'eng', {
+    logger: function(m) {
+      if (m.status === 'recognizing') {
+        var progress = Math.round(m.progress * 100);
+        setStatus('Extracting: ' + progress + '%', '');
+      }
+    }
+  }).then(function(result) {
+    var text = result.data.text;
+    console.log('OCR result:', text);
+    
+    var tracking = extractTrackingNumber(text);
+    if (tracking) {
+      console.log('Found tracking:', tracking);
+      scanner.stop().catch(function(){});
+      sendResult(tracking);
+    } else {
+      setStatus('No tracking number found. Try again or enter manually.', 'error');
+    }
+  }).catch(function(err) {
+    console.error('OCR error:', err);
+    setStatus('Error extracting text: ' + err.message, 'error');
+  });
+};
 
 Html5Qrcode.getCameras().then(function(cameras) {
   if (!cameras || cameras.length === 0) { setStatus('No camera found.', 'error'); return; }
